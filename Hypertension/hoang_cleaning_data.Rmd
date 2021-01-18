@@ -1,0 +1,934 @@
+---
+title: "Assignment 1"
+author: "mile3901 - Hoang Minh Le"
+date: "9/20/2020"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    toc_depth: 4
+---
+
+
+```{r setup, include=FALSE}
+# Default knitting options
+knitr::opts_chunk$set( # Echo the code
+                      tidy=TRUE, # Nicely dity up code
+                      warning=FALSE, # No warnings please 
+                      message=FALSE) # No messages please
+
+options(warn=-1) 
+
+# Suppress start up warnings when loading libraries
+library <- function(...) {
+  suppressPackageStartupMessages(base::library(...))
+}
+```
+
+
+```{r libraries, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(here)
+library(devtools)
+library(easyGgplot2)
+library(dplyr)
+library(hrbrthemes)
+library(readxl)   
+library(janitor)
+library(naniar)
+library(knitr)
+library(stringr)
+library(dplyr)
+library(ggplus)
+library(tidyr)
+library(kableExtra)
+library(gridExtra)
+library(plyr)
+library(reshape)
+library(ggplot2)
+library(stringr)
+load("tech_data.Rdata")
+```
+
+
+# Executive Summary
+
+
+**Summary**: In this report, 3 datasets - bio, nutrition and food related - were observed and cleaned. In short the following procedures have been done:
+
+* Removing empty columns from all 3 datasets
+* Removing constant variables (variables with same values in every cell)
+* Removing duplicate rows
+* Adding columns noting outliers
+* Changing the values of categorical variables from numbers to text
+
+Plots and tables were also created in order to observe the number of outliers and missing values. With data visualization, we were able to decide how to remove columns and rows in order to keep most of the data.
+
+During this work, we noticed that the data needed further cleaning as there were many missing values - especially in the bio data - and variables that have constant values or full of empty values. Some variables were also removed as they are not considered important. In food dataset there were also some duplicate rows, so we removed them as well. After all the modifications, the complete datasets were saved in the *clean_tech_data.Rdata* file with no missing values.
+
+**Potential Variables for Project**:
+
+From Biomedical data:
+
+* SMKSTAT - smoking status
+* AGEC - age
+* HCHOLBC - whether have high cholesterol
+* SF2SA1QN - socio-economic disadvantage
+* DIABBC - diabetes mellitus
+* SEX - sex
+
+Obviously there are more we can choose, but the above ones are the interesting ones that could be used as data labels for classification or regression models later in the project such as determining the nutrition intake of males and females, observing obesity in young adults or how food influence high cholesterol.
+
+
+From Nutrition data:
+
+* MEAT1N - meat intake
+* WATER1N - water drank
+* FRESUG2N - added sugar
+* FATT1 - total fat intake
+* SUGART2 - sugar intake
+* ALCT1 - alcohol intake
+
+These are some of the variables that could affect obesity and health in general. We may be able to see how sugar or fat affect our health. Obviously there are other variables, so nutrition students will help us with the domain knowledge.
+
+From Food data:
+
+* CAFFMG - caffeine
+* FRUITSRV - fruits intake
+* OWHLVSRV - whole vegetable intake
+* HFDAGM - higher fat dairy foods
+* EATTIMEC - time to began eating
+* RFBRSRV - refined bread
+
+You are what you eat, and observing the variety of food eaten could be important in our research study. Therefore, these variable could be useful later on.
+
+**Missingness and Outliers**:
+
+When it comes to outliers both the nutrition and food datasets have many outliers. While the nutrition dataset has variable with 3 thousand outliers, the food dataset can have up to 80 thousand outliers in one variable. Meanwhile, the bio data has only a few hundred outliers in each numerical variable. With that in mind, we created new columns for each variable to mark the values as outliers or non-outliers.
+
+
+When it comes to missing values, food data and nutrition datasets do not have many missing values. Food dataset has one variable with around 50% missingness but other than that, there are not many missing values. Looking at the rows in food data, rows have 0-3 missing values. 
+
+
+Similarly, nutrition dataset has very few missing values, only a couple columns have missing values with less than 20% missing values. Just like with food dataset, looking at the rows in the nutrition data, rows have between 0 and 3 missing values.
+
+
+However, bio data has many columns with many missing values. Some of the columns have more than 50% missing values, and it can go up to 70% missing values. Looking at the rows, rows can have 40 missing values and 30 missing values in a row is also common. This table needed to be considered the most when it comes to removing missing values.
+
+**Size of Dataset**:
+
+Table | Original Size (col x row) | New Size (col x row)
+------|---------------------------|---------------------
+Food  | 229 x 341897              | 435 x 340915
+Nutr  | 194 x 12153               |  379 x 10242
+Bio   | 94 x 12153                |  44 x 7475
+
+
+
+# Exploratory Data Analysis
+
+In this section, we are going to elaborate on some of the observation we can see by visualising the data, and do some further cleaning of the data.
+
+## Remove Empty Columns
+
+We remove the empty columns
+
+```{r, message=FALSE, warning=FALSE}
+tech_food = remove_empty(tech_food, "cols")
+tech_nutr = remove_empty(tech_nutr, "cols")
+tech_biom = remove_empty(tech_biom, "cols")
+```
+
+
+## Constant Variables
+
+We are going to list the columns with constant variables
+
+
+```{r, message=FALSE, warning=FALSE}
+
+tech_biom_num = select_if(tech_biom, is.numeric)
+constant_biom = matrix(names(tech_biom_num[, apply(tech_biom_num, 2, var, na.rm=TRUE) == 0]),ncol=1)
+
+tech_food_num = select_if(tech_food, is.numeric)
+constant_food = matrix(names(tech_food_num[, apply(tech_food_num, 2, var, na.rm=TRUE) == 0]), ncol = 1)
+
+tech_nutr_num = select_if(tech_nutr, is.numeric)
+constant_nutr= matrix(names(tech_nutr_num[, apply(tech_nutr_num, 2, var, na.rm=TRUE) == 0]),ncol=1)
+
+matrix_biom = cbind(rep("tech_biom", each=length(constant_biom)),constant_biom)
+
+matrix_food = cbind(rep("tech_food", each=length(constant_food)),constant_food)
+matrix_nutr = cbind(rep("tech_nutr", each=length(constant_nutr)),constant_nutr)
+
+table_constant = rbind(matrix_food,matrix_nutr,matrix_biom)
+
+
+
+table_constant = data.frame(table_constant)
+colnames(table_constant) = c("Table Name", "Variable Name")
+```
+
+```{r, message=FALSE, warning=FALSE}
+kbl(table_constant) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+
+
+```
+
+This code removes the constant variables
+
+```{r, message=FALSE, warning=FALSE}
+tech_biom = remove_constant(tech_biom)
+tech_food = remove_constant(tech_food)
+tech_nutr = remove_constant(tech_nutr)
+```
+
+
+## Duplicates
+
+We display the dimension of the three datasets, and see if there are duplicate rows. If yes, we remove them.
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+dim_biom = dim(tech_biom)
+dim_food = dim(tech_food) #duplicates here
+dim_nutr = dim(tech_nutr)
+
+current_dim = rbind(rbind(dim_biom, dim_nutr), dim_food)
+
+colnames(current_dim) = c("Row", "Column")
+rownames(current_dim) = c("tech_biom", "tech_nutr", "tech_food")
+DT::datatable(current_dim, caption = "Old Dimension",options = list(searching = FALSE,pageLength = 5,lengthMenu = c(5, 10, 15, 20), scrollX = T)) 
+
+
+tech_biom = tech_biom %>% distinct()
+tech_food = tech_food %>% distinct()
+tech_nutr = tech_nutr %>% distinct()
+
+tech_biom = tech_biom[,!duplicated(colnames(tech_biom))]
+tech_food = tech_food[,!duplicated(colnames(tech_food))]
+tech_nutr = tech_nutr[,!duplicated(colnames(tech_nutr))]
+
+dim_biom = dim(tech_biom)
+dim_food = dim(tech_food) #duplicates here
+dim_nutr = dim(tech_nutr)
+
+new_dim = rbind(rbind(dim_biom, dim_nutr), dim_food)
+
+colnames(new_dim) = c("Row", "Column")
+rownames(new_dim) = c("tech_biom", "tech_nutr", "tech_food")
+
+DT::datatable(new_dim, caption = "New Dimension", options = list(searching = FALSE,pageLength = 5,lengthMenu = c(5, 10, 15, 20), scrollX = T)) 
+
+```
+
+
+We could se that the Food dataset had some duplicate rows.
+
+## Numerical Values
+
+
+We are going to count the inconsistent values based on the data dictionaries. That means, if the numerical variable has a set range in the data dictionary, we will check if there is any value that is out of range.
+
+```{r}
+nutr_num = select_if(tech_nutr, is.numeric)
+nutr_col = colnames(nutr_num)
+
+mat_num = matrix(nrow =length(nutr_col), ncol = 2,)
+colnames(mat_num) = c("Variable name", "Count")
+
+for(i in 1:length(nutr_col)){
+  
+  values = dict_nutr$description[dict_nutr$variable_name == nutr_col[i]]
+  idx = which(startsWith(values, "0-"))
+  values = values[idx]
+  split_values = str_split(values, "-")[[1]]
+  min_val = as.numeric(split_values[1])
+  max_val = as.numeric(strsplit(split_values[2], " ")[[1]][1])
+  
+  num_incon = sum(nutr_num[,nutr_col[i]] < min_val | nutr_num[,nutr_col[i]] > max_val, na.rm = T)
+  mat_num[i,] = c(nutr_col[i], num_incon)
+  
+}
+
+DT::datatable(as.data.frame(mat_num), caption = "Inconsistent Values in Nutrition Data", options = list(searching = FALSE,pageLength = 5,lengthMenu = c(5, 10, 15, 20), scrollX = T))
+
+```
+
+
+
+```{r}
+food_num = select_if(tech_food, is.numeric)
+food_col = colnames(food_num)
+
+mat_num = matrix(nrow =length(food_col), ncol = 2,)
+colnames(mat_num) = c("Variable name", "Count")
+
+for(i in 1:length(food_col)){
+  
+  values = dict_food$description[dict_food$variable_name == food_col[i]]
+  idx = which(startsWith(values, "0-"))
+  values = values[idx]
+  split_values = str_split(values, "-")[[1]]
+  min_val = as.numeric(split_values[1])
+  max_val = as.numeric(strsplit(split_values[2], " ")[[1]][1])
+  
+  num_incon = sum(food_num[,food_col[i]] < min_val | food_num[,food_col[i]] > max_val, na.rm = T)
+  mat_num[i,] = c(food_col[i], num_incon)
+  
+}
+DT::datatable(as.data.frame(mat_num), caption = "Inconsistent Values in Food Data", list(searching = FALSE,pageLength = 5,lengthMenu = c(5, 10, 15, 20), scrollX = T))
+
+```
+
+## Categorical Values
+
+
+In this section, we are dealing with categorical variables. If a variable value is represented by numbers, we will change them respect to its string value from the data dictionary. We also remove some of the unnecessary categorical variables by looking at the tables. If a categorical value does not exist in the dictionary, we will set that value to **not in dictionary**.
+
+```{r}
+
+
+for(i in 1:nrow(dict_biom)){
+ 
+  value = dict_biom$description[i]
+  
+  if(startsWith(value, "0") & substring(value, 3,3) =="."){
+    dict_biom$description[i] = substring(value, 2)
+  }
+  
+  
+}
+```
+
+
+
+```{r}
+
+
+for(i in 1:nrow(dict_food)){
+ 
+  value = dict_food$description[i]
+  if(is.na(value)){
+    next()
+  }
+  
+  if(startsWith(value, "0") & substring(value, 3,3) == "."){
+    dict_food$description[i] = substring(value, 2)
+  }
+  
+  
+}
+```
+
+
+
+
+```{r, message=FALSE, warning=FALSE}
+
+tech_biom_fac = select_if(tech_biom, is.factor)
+
+
+tech_food_fac = select_if(tech_food, is.factor)
+
+
+tech_nutr_fac = select_if(tech_nutr, is.factor)
+
+
+```
+
+
+
+
+
+```{r, message=FALSE, warning=FALSE}
+
+replaceValue <- function(df,name, dict){
+  
+  a = dict[dict$variable_name == name, ]$description
+  
+  
+  
+  for(i in 1:length(levels(df[,name]))){
+    
+    n = levels(df[,name])[i]
+    
+    
+    value = which(startsWith(a, paste(n,".", sep = "")))
+    
+    value = a[value]
+    if(length(value) ==0){
+      levels(df[,name])[i]= "not in dictionary"
+      next()
+    }
+    
+    value = str_split_fixed(value,paste(n,"\\.", sep = ""),2)[2]
+    
+    if(startsWith(value, " ")){
+      value = str_trim(value, side="left")
+    }
+    
+    levels(df[,name])[i]= value
+  }
+  
+  
+  return(df)
+  
+}
+
+removeVar <- function(df, name){
+  
+  if(name == "ABSPID" || name == "ABSHID"){
+    return(df)
+  }
+  
+  new_df = df[, !(names(df) %in% c(name))]
+  return(new_df)
+}
+
+
+checkCol <-function(df, name, dict){
+  
+  
+  
+  a = dict[dict$variable_name == name,]$description
+  
+  val = grep("\\.", a,value = TRUE)
+  
+  if(length(val) > 0){
+    return(TRUE)
+  }
+  else{
+    return(FALSE)
+  }
+  
+  
+}
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+
+tech_food_new = tech_food
+
+for(i in 1:length(colnames(tech_food_fac))){
+  
+  name = colnames(tech_food_fac)[i]  
+  
+  if(!checkCol(tech_food_fac, name, dict_food)){
+    
+    tech_food_new = removeVar(tech_food_new, name)
+  }
+  else{
+    
+    tech_food_new = replaceValue(tech_food_new, name, dict_food)
+  }
+  
+}
+
+
+a = head(select_if(tech_food_new, is.factor),100)
+DT::datatable(a, caption = "Categorical Values in Food Data", options = list(searching = FALSE,pageLength = 5,lengthMenu = c(5, 10, 15, 20), scrollX = T))
+
+```
+
+
+
+
+
+
+
+
+```{r, message=FALSE, warning=FALSE}
+
+tech_biom_new = tech_biom
+
+for(i in 1:length(colnames(tech_biom_fac))){
+  
+  name = colnames(tech_biom_fac)[i]  
+  
+  
+  if(!checkCol(tech_biom_fac, name, dict_biom)){
+    
+    #tech_biom_new = removeVar(tech_biom_new, name)
+    next()
+  }
+  else{
+    
+    tech_biom_new = replaceValue(tech_biom_new, name, dict_biom)
+  }
+  
+}
+
+#replaceValue(tech_biom_new,"SMSBC", dict_biom)
+a =head(select_if(tech_biom_new, is.factor),100)
+DT::datatable(a, caption = "Categorical Values in Bio Data", options = list(searching = FALSE,pageLength = 5,lengthMenu = c(5, 10, 15, 20), scrollX = T))
+```
+
+
+We were able to change the categorical variables. With this, we could also detect inconsistent values. Note that the Nutrition dataset does not contain categorical variables.
+
+
+
+## Plot for Outliers
+
+We are going to plot the outliers for each variable from all three datasets. Due to having too many variables, I decided to plot them as barplots to see relatively how many outliers there are. Plotting with boxplot would have made the visualisation difficult and messy.
+
+```{r, message=FALSE, warning=FALSE}
+
+length_tech_food = length(tech_food_new)
+tech_food_num = select_if(tech_food_new, is.numeric)
+
+outlierList_food = NULL
+
+for(i in 1: length(colnames(tech_food_num))){
+  
+  outlierList_food[[i]] = boxplot.stats(tech_food_num[,i])$out
+  
+}
+
+
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+
+a = as.integer(unlist(lapply(outlierList_food, length)))
+
+
+numOutliers = cbind.data.frame(colnames(tech_food_num), a)
+colnames(numOutliers) <- c("Variable", "Count")
+
+ggplot(numOutliers, aes(x=Variable, y=Count))+geom_bar(stat="identity", width = 0.70,color="blue", fill="white")+coord_flip()+theme_minimal()+ggtitle("Number of Outliers for Each Numerical Variable, Food data")
+
+```
+
+
+```{r}
+
+length_tech_nutr = length(tech_nutr)
+
+outlierList_nutr = NULL
+
+for(i in 1: length(colnames(tech_nutr_num))){
+  
+  outlierList_nutr[[i]] = boxplot.stats(tech_nutr_num[,i])$out
+  
+}
+
+a = as.integer(unlist(lapply(outlierList_nutr, length)))
+
+
+numOutliers = cbind.data.frame(colnames(tech_nutr_num), a)
+colnames(numOutliers) <- c("Variable", "Count")
+
+ggplot(numOutliers, aes(x=Variable, y=Count))+geom_bar(stat="identity", width = 0.85,color="blue", fill="white")+coord_flip()+theme_minimal()+ggtitle("Number of Outliers for Each Numerical Variable, Nutrition data")
+
+```
+
+
+
+```{r}
+
+length_tech_biom = length(tech_biom_new)
+
+tech_biom_num = select_if(tech_biom_new, is.numeric)
+
+outlierList_biom = NULL
+
+for(i in 1: length(colnames(tech_biom_num))){
+  
+  outlierList_biom[[i]] = boxplot.stats(tech_biom_num[,i])$out
+  
+}
+
+a = as.integer(unlist(lapply(outlierList_biom, length)))
+
+
+numOutliers = cbind.data.frame(colnames(tech_biom_num), a)
+colnames(numOutliers) <- c("Variable", "Count")
+
+ggplot(numOutliers, aes(x=Variable, y=Count))+geom_bar(stat="identity", width = 0.85,color="blue", fill="white")+coord_flip()+theme_minimal()+ggtitle("Number of Outliers for Each Numerical Variable, Bio data")
+```
+
+It seems like the Bio data had the least amount of outliers. We will not deal with them for now as they could be important and/or the columns will not be used at all. With that, we will avoid some work.
+
+
+
+## Plot of Missingness
+
+We also create a table to see how many missing values there are. It seems like Food data has only one variable that has a lot of missing values. We will remove it.
+
+Meanwhile, Nutrition data have some variables with missing values but not too many. However the Bio data has a lot of missing values with many of them missing >50% of the values. We will remove some of the columns.
+
+
+```{r}
+
+kable(miss_var_summary(tech_food_new),digits=2, format = "html", col.names = c("Variable", "Number of Missing Values", "Percentage of Missing Values"), align = "c", caption = "Food data") %>% scroll_box(width = "80%", height = "400px")
+
+kable(miss_var_summary(tech_nutr),digits=2, format = "html", col.names = c("Variable", "Number of Missing Values", "Percentage of Missing Values"), align = "c", caption = "Nutrition data") %>% scroll_box(width = "80%", height = "400px")
+
+kable(miss_var_summary(tech_biom_new),digits=2, format = "html", col.names = c("Variable", "Number of Missing Values", "Percentage of Missing Values"), align = "c", caption = "Bio data") %>% scroll_box(width = "80%", height = "400px")
+
+
+
+```
+
+
+
+
+```{r}
+
+gg_miss_var(tech_food_new)+xlab("Missing Values")+ylab("Variable")+ggtitle("Relative Number of Missing Values, Food data")+ theme_minimal()
+
+```
+
+
+
+```{r}
+
+gg_miss_var(tech_biom_new)+xlab("Missing Values")+ylab("Variable")+ggtitle("Relative Number of Missing Values, Bio data")+ theme_minimal()
+
+```
+
+
+```{r}
+gg_miss_var(tech_nutr)+xlab("Missing Values")+ylab("Variable")+ggtitle("Relative Number of Missing Values, Nutrition data")+ theme_minimal()
+```
+
+We also had a look at missing values by rows. Seems like rows in the Food data usually miss between 0 and 3 values in every row. That is not a huge problem.
+
+
+```{r}
+na_row_food = rowSums(is.na(tech_food_new))
+
+
+sum_na_row_food = sum(na_row_food)
+
+
+barplot(na_row_food, main="Number of Missing Values for Each Row, Food Data")
+
+
+```
+
+
+Bio data miss a lot of values by row. Looks like missing 40 values per row is the highest, but there are many rows with missing > 30 values.
+
+
+```{r}
+na_row_biom = rowSums(is.na(tech_biom_new))
+
+
+sum_na_row_biom = sum(na_row_biom)
+
+
+barplot(na_row_biom, main="Number of Missing Values for Each Row, Bio Data")
+
+
+```
+
+Similarly to Food data, nutrition data doesn't have many missing values by row. Each row misses between 0 and 3, apparently.
+
+```{r}
+na_row_nutr = rowSums(is.na(tech_nutr))
+
+
+sum_na_row_nutr = sum(na_row_nutr)
+
+
+barplot(na_row_nutr, main="Number of Missing Values for Each Row, Nutrition Data")
+
+
+```
+
+
+We also merged the table and looked at the missing values.
+
+
+```{r}
+
+merged_table = full_join(tech_food_new, tech_biom_new, by=c("ABSPID"))
+
+merged_table = full_join(merged_table, tech_nutr, by=c("ABSPID"))
+
+```
+
+There are many columns with missing values of over 60%. Look at the variables that could be because of the missing values in Bio data.
+
+
+```{r}
+kable(miss_var_summary(merged_table),digits=2, format = "html", col.names = c("Variable", "Number of Missing Values", "Percentage of Missing Values"), align = "c", caption = "Merged Table") %>% scroll_box(width = "80%", height = "400px")
+```
+
+
+Looking at missing values by row, rows wit the most missing values have around 40-50 missing values. That is not too bad.
+
+```{r}
+na_row_merged = rowSums(is.na(merged_table))
+
+
+sum_na_row_merged = sum(na_row_merged)
+
+
+barplot(na_row_merged, main="Number of Missing Values for Each Row, Merged Data")
+
+
+```
+
+Again, looking at the variables from the Combination of missingness plot, many of the variables belong to the Bio data.
+
+```{r,cache=TRUE, message=FALSE, warning=FALSE}
+require(naniar)
+
+naniar::gg_miss_upset(merged_table,text.scale = 1, nsets=6, nintersects=10)
+```
+
+
+
+
+# Outliers
+
+Here we create columns marking the outliers for each numerical variable. If value is an outlier, value will be *outlier*, otherwise *not outlier*. Outliers are extracted from boxplots with loops.
+
+
+```{r}
+
+list_boxplot = NULL
+idx = 1
+
+for(i in 1:length(colnames(tech_biom_new))){
+  
+  if(is.numeric(tech_biom_new[,i])){
+    
+    list_boxplot[[idx]] = boxplot(tech_biom_new[,i], plot = FALSE)$out
+    idx = idx+1
+  }
+  
+  
+}
+
+
+```
+
+
+```{r}
+colname_biom = colnames(tech_biom_new)
+
+idx = 1;
+for(i in 1:length(colname_biom)){
+  
+  if(is.numeric(tech_biom_new[,i])){
+    
+    col_name = paste(colname_biom[i], "_OUT", sep = "")
+    
+    col = as.data.frame(tech_biom_new[, i] %in% list_boxplot[[idx]])
+    colnames(col) = c(col_name)
+    col[col[,col_name]==TRUE,] <- "outlier"
+    col[col[,col_name]==FALSE,] <- "not outlier"
+    col[,col_name] <- as.character(col[,col_name])
+    tech_biom_new[,col_name] = col[,col_name]
+    
+    idx = idx+1
+    
+  }
+  
+}
+
+```
+
+
+```{r}
+
+list_boxplot = NULL
+idx = 1
+
+for(i in 1:length(colnames(tech_food_new))){
+  
+  if(is.numeric(tech_food_new[,i])){
+    
+    list_boxplot[[idx]] = boxplot(tech_food_new[,i], plot = FALSE)$out
+    idx = idx+1
+  }
+  
+  
+}
+
+
+```
+
+
+```{r}
+colname_food = colnames(tech_food_new)
+
+idx = 1;
+for(i in 1:length(colname_food)){
+  
+  if(is.numeric(tech_food_new[,i])){
+    
+    col_name = paste(colname_food[i], "_OUT", sep = "")
+    
+    col = as.data.frame(tech_food_new[, i] %in% list_boxplot[[idx]])
+    colnames(col) = c(col_name)
+    col[col[,col_name]==TRUE,] <- "outlier"
+    col[col[,col_name]==FALSE,] <- "not outlier"
+    col[,col_name] <- as.character(col[,col_name])
+    tech_food_new[,col_name] = col[,col_name]
+    
+    idx = idx+1
+    
+  }
+  
+}
+
+```
+
+
+
+
+
+```{r}
+
+list_boxplot = NULL
+idx = 1
+
+for(i in 1:length(colnames(tech_nutr))){
+  
+  if(is.numeric(tech_nutr[,i])){
+    
+    list_boxplot[[idx]] = boxplot(tech_nutr[,i], plot = FALSE)$out
+    idx = idx+1
+  }
+  
+  
+}
+
+
+```
+
+
+```{r}
+colname_nutr = colnames(tech_nutr)
+
+idx = 1;
+for(i in 1:length(colname_nutr)){
+  
+  if(is.numeric(tech_nutr[,i])){
+    
+    col_name = paste(colname_nutr[i], "_OUT", sep = "")
+    
+    col = as.data.frame(tech_nutr[, i] %in% list_boxplot[[idx]])
+    colnames(col) = c(col_name)
+    col[col[,col_name]==TRUE,] <- "outlier"
+    col[col[,col_name]==FALSE,] <- "not outlier"
+    col[,col_name] <- as.character(col[,col_name])
+    tech_nutr[,col_name] = col[,col_name]
+    
+    idx = idx+1
+    
+  }
+  
+}
+
+```
+
+
+# Missing Values
+
+
+We will remove some of the missing values:
+
+1. remove **COMBCODE** column from Food data as it has ~50% missing values with its corresponding _MISS and _OUT column
+
+2. remove rows with missing values
+
+```{r}
+# remove COMBCODE
+
+tech_food_new = tech_food_new[,!(names(tech_food_new) %in% c("COMBCODE", "COMBCODE_MISS", "COMBCODE_OUT"))]
+
+tech_food_new = tech_food_new[complete.cases(tech_food_new),]
+```
+
+From Bio data, we remove: 
+
+2. remove columns that have over 22% missing values with their corresponding _MISS and _OUT column
+
+3. the rows with missing values
+
+```{r}
+
+# remove column
+
+a = miss_var_summary(tech_biom_new)
+a = a$variable[a$pct_miss > 22]
+
+for(i in 1:length(a)){
+  miss = paste(a[i], "_MISS", sep = "")
+  outlir = paste(a[i], "_OUT", sep = "")
+  a = append(a, c(miss, outlir))
+  
+}
+tech_biom_new = tech_biom_new[,!(names(tech_biom_new) %in% a)]
+
+# remove rows from biom
+tech_biom_new =tech_biom_new[complete.cases(tech_biom_new),]
+
+
+
+```
+
+From Nutrition data, we remove rows only:
+
+
+```{r}
+tech_nutr = tech_nutr[complete.cases(tech_nutr),]
+```
+
+**Result**: No missing values
+
+```{r}
+kable(miss_var_summary(tech_nutr),digits=2, format = "html", col.names = c("Variable", "Number of Missing Values", "Percentage of Missing Values"), align = "c", caption = "Nutrition data") %>% scroll_box(width = "80%", height = "400px")
+```
+
+
+```{r}
+kable(miss_var_summary(tech_food_new),digits=2, format = "html", col.names = c("Variable", "Number of Missing Values", "Percentage of Missing Values"), align = "c", caption = "Food Table") %>% scroll_box(width = "80%", height = "400px")
+```
+
+```{r}
+kable(miss_var_summary(tech_biom_new),digits=2, format = "html", col.names = c("Variable", "Number of Missing Values", "Percentage of Missing Values"), align = "c", caption = "Bio Table") %>% scroll_box(width = "80%", height = "400px")
+```
+
+Then we merged the tables.
+
+```{r}
+
+merged_table = full_join(tech_food_new, tech_biom_new, by=c("ABSPID"))
+
+merged_table = full_join(merged_table, tech_nutr, by=c("ABSPID"))
+
+```
+
+
+
+# Clean Version of Data
+
+In the end we save all the tables in *clean_tech_data.Rdata*.
+
+```{r}
+
+clean_biom = tech_biom_new
+clean_food = tech_food_new
+clean_nutr = tech_nutr
+clean_merged = merged_table
+
+save(clean_biom, clean_food, clean_nutr, clean_merged,
+     file = "clean_tech_data.Rdata")
+```
+

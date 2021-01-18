@@ -1,0 +1,1572 @@
+---
+title: "Nutrition data"
+author: "mile3901"
+date: "11/7/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set( 
+                      tidy=TRUE,
+                      warning=FALSE,
+                      message=FALSE)
+
+options(warn=-1) 
+
+# Suppress start up warnings when loading libraries
+library <- function(...) {
+  suppressPackageStartupMessages(base::library(...))
+}
+```
+
+
+```{r}
+library(dplyr)
+library(sjmisc)
+library(ggpubr)
+library(cvTools)
+library(ggplot2)
+library(GGally)
+library(StatMatch)
+library(factoextra)
+library(ggbiplot)
+library(kmed)
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(MASS)
+library(rpart)
+library(ggrepel)
+library(randomForest)
+library(boot)
+library(klaR)
+library(Rtsne)
+library(cgwtools)
+library(cluster)
+library(sjPlot)
+library(sjmisc)
+library(effects)
+library(gt)
+library(jtools)
+library(vip)
+```
+
+
+```{r}
+#load('nutrition_data.Rdata')
+```
+
+
+
+
+```{r}
+X = nutr_aus_male[, !(names(nutr_aus_male) %in% c("ABSPID", "HYPBC"))]
+X <- scale(X)
+factor_X = which(sapply(X, is.factor))
+
+num_X = which(sapply(X, is.numeric))
+
+distnum = distNumeric(as.matrix(X),as.matrix(X),  method = "mrw")
+
+nutr_aus_male2 = nutr_aus_male
+nutr_aus_male = nutr_aus_male[, !(names(nutr_aus_male) %in% c("ABSPID"))]
+levels(nutr_aus_male$HYPBC) <- c(0,1)
+```
+
+
+```{r, cache=TRUE}
+fviz_nbclust(distnum, FUNcluster = fastkmed, method="silhouette", k.max = 10)
+```
+
+
+
+```{r}
+
+pc_res <- prcomp(X, scale=TRUE, center=TRUE)
+
+fviz_eig(pc_res)
+
+```
+
+```{r}
+fviz_pca_ind(pc_res,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+
+
+
+```{r}
+fviz_pca_var(pc_res,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+
+```{r}
+
+
+ggbiplot(pc_res)
+
+
+```
+
+
+```{r}
+ggbiplot(pc_res, labels=rownames(X), groups = nutr_aus_male$HYPBC)
+```
+
+
+
+```{r}
+accuracy = function(mx){
+  
+  precision = mx[1,1]/sum(mx[1,1:ncol(mx)])
+    
+  recall = mx[1,1]/sum(mx[1:nrow(mx),1])
+  
+  fscore = 2* precision * recall / (precision+recall)
+  if(is.na(fscore)){
+    fscore = 0
+  }
+  
+  return(fscore)
+}
+
+
+rep = 200
+K = 5
+n = nrow(nutr_aus_male)
+
+
+
+```
+
+
+```{r}
+
+stepBIC0_result_nutr = vector(mode = "numeric", length = rep)
+stepAIC0_result_nutr = vector(mode = "numeric", length = rep)
+stepBIC_full_result_nutr = vector(mode = "numeric", length = rep)
+stepAIC_full_result_nutr = vector(mode = "numeric", length = rep)
+lasso_result_nutr = vector(mode = "numeric", length = rep)
+ridge_result_nutr = vector(mode = "numeric", length = rep)
+
+lda1_result_nutr = vector(mode = "numeric", length = rep)
+lda2_result_nutr = vector(mode = "numeric", length = rep)
+qda1_result_nutr = vector(mode = "numeric", length = rep)
+qda2_result_nutr = vector(mode = "numeric", length = rep)
+
+
+regression_tree_result_nutr = vector(mode = "numeric", length = rep)
+random_forest_result_nutr = vector(mode = "numeric", length = rep)
+
+```
+
+
+```{r, cache=TRUE}
+set.seed(123)
+
+#Lasso and Ridge
+for(i in 1:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = T)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+  data_rep = nutr_aus_male[sample_idx,]
+
+  lasso_cv = vector(mode="numeric", length = K)
+  ridge_cv = vector(mode="numeric", length = K)
+
+  message("iteration", i)
+  for(j in 1:K){
+    
+   
+    train_data = data_rep[cv$which != j,]
+    test_data = data_rep[cv$which == j,]
+    
+    lasso = cv.glmnet(data.matrix(train_data[,!(names(train_data) %in% c("HYPBC"))]), train_data$HYPBC, alpha = 1, family = "binomial")
+
+    ridge = cv.glmnet(data.matrix(train_data[,!(names(train_data) %in% c("HYPBC"))]), train_data$HYPBC, alpha = 0, family = "binomial")
+    
+   
+  
+    lasso_cv[j] = accuracy(table(predict(lasso, newx = data.matrix(test_data[,!(names(test_data) %in% c("HYPBC"))]), s = "lambda.1se", type = "class"), test_data$HYPBC))
+     ridge_cv[j] = accuracy(table(predict(ridge, newx = data.matrix(test_data[,!(names(test_data) %in% c("HYPBC"))]), s = "lambda.1se", type = "class"), test_data$HYPBC))
+  }
+
+  lasso_result_nutr[i] = mean(lasso_cv)
+  ridge_result_nutr[i] = mean(ridge_cv)
+  
+}
+lasso_result_nutr
+```
+
+```{r, cache=TRUE, warning = F}
+set.seed(123)
+
+#stepwise null
+for(i in 1:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = T)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+  data_rep = nutr_aus_male[sample_idx,]
+  stepBIC_cv = vector(mode="numeric", length = K)
+  stepAIC_cv = vector(mode="numeric", length = K)
+
+  message("iteration", i)
+  for(j in 1:K){
+    
+   
+    train_data = data_rep[cv$which != j,]
+    test_data = data_rep[cv$which == j,]
+    
+    logistic_reg_aic_0 = glm(HYPBC~1, data = train_data, family ="binomial")
+    logistic_reg_bic_0 = glm(HYPBC~1, data = train_data, family ="binomial")
+    
+    logistic_reg_aic_full = glm(HYPBC~., data = train_data, family ="binomial")
+    logistic_reg_bic_full = glm(HYPBC~., data = train_data, family ="binomial")
+    
+    stepBICnull = step(logistic_reg_bic_0,scope=list(lower=logistic_reg_bic_0,upper=logistic_reg_bic_full ),k=log(nrow(train_data)), trace = 0)
+    
+    stepAICnull = step(logistic_reg_aic_0,scope=list(lower=logistic_reg_aic_0,upper=logistic_reg_aic_full ),k=2, trace = 0)
+    
+    stepAICnull_res =predict(stepAICnull,test_data, type = "response")
+    stepAICnull_testProb <- round(stepAICnull_res)
+
+    stepAICnull_predict = stepAICnull_testProb
+   
+    stepBICnull_res =predict(stepBICnull,test_data, type = "response")
+    stepBICnull_testProb <- round(stepBICnull_res)
+    
+
+    stepBICnull_predict = stepBICnull_testProb
+
+    stepBIC_cv[j] = accuracy(table(stepBICnull_predict, test_data$HYPBC))
+    stepAIC_cv[j] = accuracy(table( stepAICnull_predict, test_data$HYPBC))
+    
+  }
+
+  stepBIC0_result_nutr[i] = mean(stepBIC_cv)
+  stepAIC0_result_nutr[i] = mean(stepAIC_cv)
+  
+  
+}
+
+```
+
+
+
+```{r, cache=TRUE, warning = F}
+set.seed(123)
+
+#stepwiseFull BIC
+for(i in 1:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = T)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+  data_rep = nutr_aus_male[sample_idx,]
+
+  stepBIC_cv = vector(mode="numeric", length = K)
+
+  message("iteration", i)
+  for(j in 1:K){
+    
+   
+    train_data = data_rep[cv$which != j,]
+    test_data = data_rep[cv$which == j,]
+    
+    logistic_reg_bic_full = glm(HYPBC~., data = train_data, family ="binomial")
+
+    stepBICfull = step(logistic_reg_bic_full, k = log(nrow(train_data)), trace = 0)
+
+   
+    stepBICfull_res =predict(stepBICfull,test_data, type = "response")
+    stepBICfull_testProb <- round(stepBICfull_res)
+    
+    
+    stepBICfull_predict = stepBICfull_testProb
+
+    stepBIC_cv[j] = accuracy(table(stepBICfull_predict, test_data$HYPBC))
+
+    
+  }
+
+  stepBIC_full_result_nutr[i] = mean(stepBIC_cv)
+
+  
+  
+}
+
+
+```
+
+
+
+
+```{r, cache=TRUE, warning = F}
+set.seed(123)
+
+#stepwiseFull AIC
+for(i in 1:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = T)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+  data_rep = nutr_aus_male[sample_idx,]
+
+
+  stepAIC_cv = vector(mode="numeric", length = K)
+
+  message("iteration", i)
+  for(j in 1:K){
+    
+   
+    train_data = data_rep[cv$which != j,]
+    test_data = data_rep[cv$which == j,]
+    
+
+    logistic_reg_aic_full = glm(HYPBC~., data = train_data, family ="binomial")
+
+
+    stepAICfull = step(logistic_reg_aic_full, k = 2, trace = 0)
+    
+    stepAICfull_res =predict(stepAICfull,test_data, type = "response")
+    stepAICfull_predict <- round(stepAICfull_res)
+
+
+    stepAIC_cv[j] = accuracy(table(stepAICfull_predict, test_data$HYPBC))
+    
+  }
+
+  stepAIC_full_result_nutr[i] = mean(stepAIC_cv)
+  
+  
+}
+
+
+```
+
+
+```{r, cache=TRUE, warning= F}
+set.seed(123)
+
+#QDA
+for(i in 1:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = T)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+  data_rep_num = nutr_aus_male[sample_idx,]
+
+  qda1_cv = vector(mode="numeric", length = K)
+  qda2_cv = vector(mode="numeric", length = K)
+
+  message("iteration", i)
+  for(j in 1:K){
+    
+   
+    train_data_num = data_rep_num[cv$which != j,]
+    test_data_num = data_rep_num[cv$which == j,]
+    
+    qda2step = stepclass(HYPBC~., data = train_data_num, method = "qda", direction="forward", out = F)
+    qda1step = stepclass(HYPBC~., data = train_data_num, method = "qda", direction="backward", out = F)
+
+    qda1 = qda(qda1step$formula, data = train_data_num)
+    qda2 = qda(qda2step$formula, data = train_data_num)
+    
+    qda1_cv[j] = accuracy(table(predict(qda1, newdata = test_data_num)$class, test_data_num[,"HYPBC"]))
+    qda2_cv[j] = accuracy(table(predict(qda2, newdata = test_data_num)$class, test_data_num[,"HYPBC"]))
+    
+  }
+
+  qda1_result_nutr[i] = mean(qda1_cv)
+  qda2_result_nutr[i] = mean(qda2_cv)
+  
+  
+  
+}
+
+```
+
+
+
+```{r, cache=TRUE}
+set.seed(123)
+
+#LDA
+for(i in 170:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = T)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+  data_rep_num = nutr_aus_male[sample_idx,]
+  
+  lda1_cv = vector(mode="numeric", length = K)
+  lda2_cv = vector(mode="numeric", length = K)
+  message("iteration", i)
+  for(j in 1:K){
+    
+    train_data_num = data_rep_num[cv$which != j,]
+    test_data_num = data_rep_num[cv$which == j,]
+    
+    lda1step = stepclass(HYPBC~., data = train_data_num, method = "lda", direction="forward", out = F)
+    lda2step = stepclass(HYPBC~., data = train_data_num, method = "lda", direction="backward", out = F)
+    lda1 = lda(lda1step$formula, data = train_data_num)
+    lda2 = lda(lda2step$formula, data = train_data_num)
+    
+    
+    lda1_cv[j] = accuracy(table(predict(lda1, newdata = test_data_num)$class, test_data_num[,"HYPBC"]))
+    lda2_cv[j] = accuracy(table(predict(lda2, newdata = test_data_num)$class, test_data_num[,"HYPBC"]))
+    
+    
+  }
+  
+  lda1_result_nutr[i] = mean(lda1_cv)
+  lda2_result_nutr[i] = mean(lda2_cv)
+  
+  
+  
+}
+
+```
+
+
+
+
+
+
+```{r, cache=TRUE}
+set.seed(123)
+
+#classification Tree
+for(i in 1:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = T)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+ 
+  data_rep_num = nutr_aus_male[sample_idx,]
+  
+  rt_cv = vector(mode="numeric", length = K)
+
+  message("iteration ", i)
+  for(j in 1:K){
+    
+    
+    train_data_num = data_rep_num[cv$which != j,]
+    test_data_num = data_rep_num[cv$which == j,]
+    
+    rt = rpart(HYPBC~., data = train_data_num)
+
+    rt_cv[j] = accuracy(table(round(predict(rt, newdata = test_data_num, type ="vector")), test_data_num[,"HYPBC"]))
+    
+  }
+  
+  
+  
+  regression_tree_result_nutr[i] = mean(rt_cv)
+  
+  
+  
+}
+
+
+```
+
+
+```{r, cache=TRUE}
+set.seed(123)
+
+#Random Forest
+for(i in 1:rep){
+  
+  sample_idx = sample(1:n, size = n, replace = F)
+  cv = cvFolds(n, K=5, R=1, type = "random")
+  
+  data_rep = nutr_aus_male[sample_idx,]
+  data_rep$HYPBC <- as.factor(data_rep$HYPBC)
+  rf_cv =vector(mode="numeric", length = K)
+
+  message("iteration ",i)
+  for(j in 1:K){
+    
+    train_data = data_rep[cv$which != j,]
+    test_data = data_rep[cv$which == j,]
+    test_x = test_data[, !(names(test_data) %in% c("HYPBC"))]
+    test_y = test_data$HYPBC
+    
+    rf = randomForest(HYPBC~., data = train_data, importance=T, proximity=T, ntree = 500, xtest = test_x, ytest = test_y)
+    
+    rf_cv[j] = accuracy(rf$confusion)
+    
+  }
+  
+  random_forest_result_nutr[i] = mean(rf_cv)
+  
+  
+  
+}
+
+random_forest_result_nutr
+```
+
+
+
+
+
+
+```{r}
+theme_bluewhite <- function (base_size = 11, base_family = "") {
+    theme_bw() %+replace% 
+    theme(
+      panel.grid.major  = element_line(color = "white"),
+      panel.background = element_rect(fill = "lightblue"),
+      panel.border = element_rect(color = "lightblue", fill = NA),
+      axis.line = element_line(color = "lightblue"),
+      axis.ticks = element_line(color = "lightblue"),
+      axis.text = element_text(color = "steelblue")
+      )
+}
+
+
+stepBIC0_df_nutr = data.frame(stepBIC0_result_nutr)
+stepAIC0_df_nutr = data.frame(stepAIC0_result_nutr)
+stepBIC_full_df_nutr = data.frame(stepBIC_full_result_nutr)
+stepAIC_full_df_nutr = data.frame(stepAIC_full_result_nutr) 
+lasso_df_nutr= data.frame(lasso_result_nutr) 
+ridge_df_nutr = data.frame(ridge_result_nutr)
+
+lda1_df_nutr = data.frame(lda1_result_nutr)
+lda2_df_nutr = data.frame(lda2_result_nutr)
+qda1_df_nutr = data.frame(qda1_result_nutr)
+qda2_df_nutr = data.frame(qda2_result_nutr)
+
+
+rt_df_nutr = data.frame(regression_tree_result_nutr)
+rf_df_nutr = data.frame(random_forest_result_nutr)
+```
+
+
+
+```{r}
+stepBIC0_plot = ggplot(stepBIC0_df_nutr, aes(x="", y = stepBIC0_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LR, BIC null")+theme_bluewhite()
+
+stepAIC0_plot = ggplot(stepAIC0_df_nutr, aes(x="", y = stepAIC0_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LR, AIC null")+theme_bluewhite()
+
+stepBIC_full_plot = ggplot(stepBIC_full_df_nutr, aes(x="", y = stepBIC_full_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LR, BIC full")+theme_bluewhite()
+
+stepAIC_full_plot = ggplot(stepAIC_full_df_nutr, aes(x="", y = stepAIC_full_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LR, AIC full")+theme_bluewhite()
+
+lasso_plot = ggplot(lasso_df, aes(x="", y = lasso_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LR, LASSO")+theme_bluewhite()
+
+ridge_plot = ggplot(ridge_df_nutr, aes(x="", y = ridge_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LR, Ridge")+theme_bluewhite()
+
+
+text = text_grob(expression(bold("Supplementary Figure 17. Model Performance on Nutrition Data - Logistic Regression (LR)\nComparing different classification models by F1-score. \nRepeated 5 cross-fold validation was used 200 times and in each iteration \nmean F1-score was kept. The boxplots show the distribution of those values.")), size =9)
+
+plot_list3 = list(stepBIC0_plot+ggtitle("(A)"), stepAIC0_plot+ggtitle("(B)"),stepBIC_full_plot+ggtitle("(C)"),stepAIC_full_plot+ggtitle("(D)"), lasso_plot+ggtitle("(E)"),ridge_plot+ggtitle("(F)"))
+
+sfigure17 = ggarrange(plots =plot_list3, bottom = text, padding = unit(10, "line"), ncol = 3)
+resave(sfigure17, file = "hoang_sfigure.Rdata")
+ggsave("images/sfigure17.png", plot = p)
+```
+
+```{r}
+mean(stepBIC0_result_nutr)
+mean(stepAIC0_result_nutr)
+mean(stepBIC_full_result_nutr)
+mean(stepAIC_full_result_nutr)
+mean(lasso_result_nutr)
+mean(ridge_result_nutr) #ridge
+
+mean(lda1_result_nutr)
+mean(qda2_result_nutr)
+mean(lda2_result_nutr)
+mean(qda1_result_nutr)
+
+mean(regression_tree_result_nutr)
+mean(random_forest_result_nutr)
+```
+
+
+```{r}
+median(stepBIC0_result_nutr)
+median(stepAIC0_result_nutr)
+median(stepBIC_full_result_nutr)
+median(stepAIC_full_result_nutr)
+median(lasso_result_nutr)
+median(ridge_result_nutr) #this is the best
+
+median(lda1_result_nutr)
+median(qda2_result_nutr)
+median(lda2_result_nutr)
+median(qda1_result_nutr)
+
+
+median(regression_tree_result_nutr)
+median(random_forest_result_nutr)
+```
+
+
+
+```{r}
+lda1_plot = ggplot(lda1_df_nutr, aes(x="", y = lda1_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LDA1")+theme_bluewhite()
+
+lda2_plot = ggplot(lda2_df_nutr, aes(x="", y = lda2_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("LDA2")+theme_bluewhite()
+
+qda1_plot = ggplot(qda1_df_nutr, aes(x="", y = qda1_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("QDA1")+theme_bluewhite()
+
+qda2_plot = ggplot(qda2_df_nutr, aes(x="", y = qda2_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("QDA2")+theme_bluewhite()
+
+
+
+rt_plot = ggplot(rt_df_nutr, aes(x="", y = regression_tree_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("Classification Tree")+theme_bluewhite()
+
+rf_plot = ggplot(rf_df_nutr, aes(x="", y = random_forest_result_nutr))+geom_boxplot()+ylab("F1-score")+xlab("Random Forest")+theme_bluewhite()
+
+plot_list4 = list(lda1_plot+ggtitle("(A)"), lda2_plot+ggtitle("(B)"),qda1_plot+ggtitle("(D)"),qda2_plot+ggtitle("(C)"),rt_plot+ggtitle("(E)"))
+
+text = text_grob(expression(bold("Supplementary Figure 18. Model Performance on Nutrition Data - Linear Discriminant Analysis (LDA), \nQuadratic Discriminant Analysis (QDA), Logistic Regression (LR)\nComparing different classification models by F1-score. \nRepeated 5 cross-fold validation was used 200 times and in each iteration \nmean F1-score was kept. The boxplots show the distribution of those values.")), size = 10)
+
+sfigure18 = ggarrange(plots = plot_list4, bottom = text, padding = unit(12, "line"), ncol = 3)
+resave(sfigure18, file = "hoang_sfigure.Rdata")
+ggsave("images/sfigure18.png", plot = p)
+```
+
+
+```{r}
+text = text_grob(expression(bold("Supplementary Figure 19. Model Performance on Nutrition Data, Male - Random Forest\nBoxplot explains the perfromance of random forest classification model on \nnutrition data.Performance was measured with 200-time repeated 5 cross-fold validation. \nThe accuracy was around 71%.")), size =10)
+sfigure19 = ggarrange(rf_plot+ggtitle("Performance of Random Forest"), bottom = text, padding = unit(8, "line"))
+resave(sfigure19, file = "hoang_sfigure.Rdata")
+ggsave("images/sfigure19.png", plot = p)
+```
+
+
+
+
+```{r}
+ridge_regression = cv.glmnet(data.matrix(nutr_aus_male[,!(names(nutr_aus_male) %in% c("HYPBC"))]),nutr_aus_male$HYPBC, alpha = 0, family = "binomial", standardize = T, nfolds = 5)
+
+ridge_regression2 = glmnet(data.matrix(nutr_aus_male[,!(names(nutr_aus_male) %in% c("HYPBC"))]),nutr_aus_male$HYPBC, alpha = 0, family = "binomial", lambda =  ridge_regression$lambda.1se)
+
+ridge_regression3 = train(nutr_aus_male, method ="glmnet", tr)
+```
+
+```{r}
+ridge_regression2$beta
+```
+
+
+
+```{r}
+yaxis = c("% of Energy from \n Trans Fatty Acid", "% of Energy from Alcohol", "Alcohol (g)", "% of Energy from \n Saturated Fat", "% of Energy from Fat", "Fat (g)", "Read Meat (g)", "Caffeine (g)", "Cholesterol (g)", "Sodium (g)", "Trans Fatty Acid", "Water (g)", "Polyunsaturated Fat (g)", "% of Energy from \n Polyunsaturated Fat")
+
+yaxis = c("TRANPER" ="% of Energy from Trans \nFatty Acid", "ALCPER" = "% of Energy from Alcohol","ALCT" ="Alcohol (g)", "SATPER"="% of Energy from\nSaturated Fat", "FATPER" ="% of Energy from Fat","SATFATT" = "Saturated Fat (g)" ,"FATT" ="Fat (g)","RDMTTG1N" = "Red Meat (g)", "CAFFT" = "Caffeine (mg)","CHOLT" = "Cholesterol (mg)","SODIUMT" ="Sodium (mg)","TRANST" = "Trans Fatty Acid (mg)","WATERG1" ="Water (g)","PUFATT" ="Polyunsaturated Fat (g)","POLYPER" ="% of Energy from  Polyun-\nsaturated Fat")
+
+imp = varImp(ridge_regression2, lambda = 0)
+library(data.table)
+
+imp <- setDT(imp, keep.rownames = T)[]
+imp <- imp[order(imp$Overall, decreasing = T),]
+imp
+
+a = vip::vip(ridge_regression2, fill = "white", color ="black", alpha = 0.8, num_features = 20)+ggtitle("Coefficient Plot, Logistic Regression Ridge")+ylab(expression(bold("Coefficient")))+scale_x_discrete(labels=yaxis)+xlab("Variables")+ theme_bluewhite()
+
+f = text_grob(expression(bold("Figure 4. Coeffiecient of Logistic Regression, Male\nThe coefficients show the scale in which the variable impact hypertension\nin terms of 1 unit increase. That means alcohol and trans \nfatty acid (%) have a higher impact on male hypertension. \nMeanwhile polyunsaturated fat could contribute to healthier lifestyle with negative coefficient.")), size = 8)
+
+figure4 = egg::ggarrange(a, bottom = f,  padding = unit(9, "line"), heights = c(2))
+resave(figure4, file = "hoang_figure.Rdata")
+ggsave("images/figure4.png", plot = figure4)
+```
+
+
+```{r}
+plot(ridge_regression2,main = "Effect Plot, Logistic Regression, LASSO")
+```
+
+
+
+```{r}
+
+drop(coef.glmnet(ridge_regression, s = ridge_regression$lambda.1se))[order(abs(drop(coef.glmnet(ridge_regression, s = ridge_regression$lambda.1se))))]
+
+drop(ridge_regression2$beta)[order(abs(ridge_regression2$beta))]
+```
+
+
+```{r}
+coef(ridge_regression, ridge_regression$lambda.min)
+```
+
+
+```{r}
+tab_model(ridge_regression2, transform = NULL)
+```
+
+
+# plotting data:
+
+##RDMTTG1N
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = RDMTTG1N))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("RDMTTG1N")+theme_bluewhite()
+```
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$RDMTTG1N %in% boxplot(nutr_aus_male_hyp$RDMTTG1N, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$RDMTTG1N %in% boxplot(nutr_aus_male_no_hyp$RDMTTG1N, plot=F)$out),]
+
+```
+
+
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$RDMTTG1N, nutr_aus_male_no_hyp$RDMTTG1N, alternative ="greater", correct = F)
+
+p_table[7,] = c("Red Meat", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+## FATT
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = FATT))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("FATT")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$FATT %in% boxplot(nutr_aus_male_hyp$FATT, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$FATT %in% boxplot(nutr_aus_male_no_hyp$FATT, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$FATT, nutr_aus_male_no_hyp$FATT, alternative ="greater", correct = F)
+
+p_table[8,] = c("Fat (g)", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+## ALCT
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = ALCT))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("FATT")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$ALCT %in% boxplot(nutr_aus_male_hyp$ALCT, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$ALCT %in% boxplot(nutr_aus_male_no_hyp$ALCT, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$ALCT, nutr_aus_male_no_hyp$ALCT, alternative ="greater", correct = F)
+
+p_table[9,] = c("Alcohol (g)", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+## SODIUMT
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = SODIUMT))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("SODIUMT")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$SODIUMT %in% boxplot(nutr_aus_male_hyp$SODIUMT, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$SODIUMT %in% boxplot(nutr_aus_male_no_hyp$SODIUMT, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$SODIUMT, nutr_aus_male_no_hyp$SODIUMT, alternative ="greater", correct = F)
+p_table[10,] = c("Sodium", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+## CAFFT
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = CAFFT))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("CAFFT")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$CAFFT %in% boxplot(nutr_aus_male_hyp$CAFFT, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$CAFFT %in% boxplot(nutr_aus_male_no_hyp$CAFFT, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a  = wilcox.test(nutr_aus_male_hyp$CAFFT, nutr_aus_male_no_hyp$CAFFT, alternative ="greater", correct = F)
+p_table[11,] = c("Caffeine", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+## CHOLT
+
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = CHOLT))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("CHOLT")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$CHOLT %in% boxplot(nutr_aus_male_hyp$CHOLT, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$CHOLT %in% boxplot(nutr_aus_male_no_hyp$CHOLT, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$CHOLT, nutr_aus_male_no_hyp$CHOLT, alternative ="greater", correct = F)
+p_table[12,] = c("Cholesterol", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+## SATFATT
+
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = SATFATT))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("SATFATT")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$SATFATT %in% boxplot(nutr_aus_male_hyp$SATFATT, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$SATFATT %in% boxplot(nutr_aus_male_no_hyp$SATFATT, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$SATFATT, nutr_aus_male_no_hyp$SATFATT, alternative ="greater", correct = F)
+p_table[13,] = c("Saturated Fat", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+## PUFATT
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = PUFATT))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("PUFATT")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$PUFATT %in% boxplot(nutr_aus_male_hyp$PUFATT, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$PUFATT %in% boxplot(nutr_aus_male_no_hyp$PUFATT, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$PUFATT, nutr_aus_male_no_hyp$PUFATT, alternative ="greater", correct = F)
+p_table[14,] = c("Polyunsaturated Fat (g)", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+## TRANST
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = TRANST))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("TRANST")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$TRANST %in% boxplot(nutr_aus_male_hyp$TRANST, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$TRANST %in% boxplot(nutr_aus_male_no_hyp$TRANST, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$TRANST, nutr_aus_male_no_hyp$TRANST, alternative ="greater", correct = F)
+p_table[15,] = c("Trans Fatty Acid", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+## FATPER
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y = FATPER))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("FATPER")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$FATPER %in% boxplot(nutr_aus_male_hyp$FATPER, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$FATPER %in% boxplot(nutr_aus_male_no_hyp$FATPER, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a= wilcox.test(nutr_aus_male_hyp$FATPER, nutr_aus_male_no_hyp$FATPER, alternative ="greater", correct = F)
+p_table[16,] = c("Fat %", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+## ACLPER
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y =ALCPER))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("ALCPER")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$ALCPER %in% boxplot(nutr_aus_male_hyp$ALCPER, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$ALCPER %in% boxplot(nutr_aus_male_no_hyp$ALCPER, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$ALCPER, nutr_aus_male_no_hyp$ALCPER, alternative ="greater", correct = F)
+p_table[17,] = c("Alcohol %", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+## SATPER
+
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y =SATPER))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("SATPER")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$SATPER %in% boxplot(nutr_aus_male_hyp$SATPER, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$SATPER %in% boxplot(nutr_aus_male_no_hyp$SATPER, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$SATPER, nutr_aus_male_no_hyp$SATPER, alternative ="greater", correct = F)
+p_table[18,] = c("Saturated Fat %", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+
+
+## TRANPER
+
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y =TRANPER))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("TRANPER")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$TRANPER %in% boxplot(nutr_aus_male_hyp$TRANPER, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$TRANPER %in% boxplot(nutr_aus_male_no_hyp$TRANPER, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$TRANPER, nutr_aus_male_no_hyp$TRANPER, alternative ="greater", correct = F)
+p_table[19,] = c("Trans Fatty Acid %", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+## POLYPER
+
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y =POLYPER))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("POLYPER")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$POLYPER %in% boxplot(nutr_aus_male_hyp$POLYPER, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$POLYPER %in% boxplot(nutr_aus_male_no_hyp$POLYPER, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$POLYPER, nutr_aus_male_no_hyp$POLYPER, alternative ="less", correct = F)
+p_table[20,] = c("Polyunsaturated Fat %", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+## WATERG1
+
+```{r}
+ggplot(nutr_aus_male, aes(x = as.factor(HYPBC), y =WATERG1))+ geom_boxplot()+coord_flip()+xlab("Hypertension")+ylab("WATERG1")+theme_bluewhite()
+```
+
+
+
+
+
+```{r}
+nutr_aus_male_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 1,]
+
+nutr_aus_male_hyp = nutr_aus_male_hyp[!(nutr_aus_male_hyp$WATERG1 %in% boxplot(nutr_aus_male_hyp$WATERG1, plot=F)$out),]
+
+nutr_aus_male_no_hyp = nutr_aus_male[nutr_aus_male$HYPBC == 0,]
+
+nutr_aus_male_no_hyp = nutr_aus_male_no_hyp[!(nutr_aus_male_no_hyp$WATERG1 %in% boxplot(nutr_aus_male_no_hyp$WATERG1, plot=F)$out),]
+
+```
+
+
+
+```{r}
+a = wilcox.test(nutr_aus_male_hyp$WATERG1, nutr_aus_male_no_hyp$WATERG1, alternative ="greater", correct = F)
+p_table[21,] = c("Water", round(a$p.value, 4), a$p.value >= 0.05, "male")
+```
+
+
+
+# Nutr aus compare
+
+
+## FATT
+```{r}
+
+
+FATT_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = FATT, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Fat Consumption")+ylab("Fat (g)")+xlab("Sex")
+```
+
+## RDMTGT1N
+
+```{r}
+RDMTGT1N_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = RDMTTG1N, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Red Meat Consumption")+ylab("Red Meat (g)")+xlab("Sex")
+```
+
+
+
+## ALCT
+
+```{r}
+ALCT_box =nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = ALCT, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Alcohol Consumption")+ylab("Alcohol (g)")+xlab("Sex")
+```
+
+## SODIUMT
+
+
+```{r}
+SODIUMT_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = SODIUMT, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Sodium Consumption")+ylab("Sodium (mg)")+xlab("Sex")
+```
+
+
+## CAFFT
+
+```{r}
+CAFFT_box =nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = CAFFT, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Caffeine Consumption")+ylab("Caffeine (g)")+xlab("Sex")
+```
+
+
+## CHOLT
+
+```{r}
+CHOLT_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = CHOLT, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Cholesterol Consumption")+ylab("Cholesterol (mg)")+xlab("Sex")
+```
+## SATFATT
+
+```{r}
+SATFATT_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = SATFATT, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Saturated Fat Consumption")+ylab("Saturated fat (g)")+xlab("Sex")
+```
+## PUFATT
+
+```{r}
+PUFATT_box  =nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = PUFATT, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Polyunsaturated Fat Consumption")+ylab("Polyunsaturated fat (g)")+xlab("Sex")
+```
+
+## TRANST
+
+
+```{r}
+TRANST_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = TRANST, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Trans Fatty Acid Consumption")+ylab("Trans Fatty Acid (mg)")+xlab("Sex")
+```
+
+## FATPER
+
+
+```{r}
+FATPER_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = FATPER, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Caffeine % of Energy Intake")+ylab("Fat %")+xlab("Sex")
+```
+
+
+## ALCPER
+
+```{r}
+ALCPER_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = ALCPER, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle(" % of Energy Intake Alcohol")+ylab("Alcohol %")+xlab("Sex")
+```
+
+## SATPER
+
+```{r}
+SATPER_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = SATPER, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("% of Energy Intake Saturated Fat")+ylab("Saturated Fat %")+xlab("Sex")
+```
+
+## TRANPER
+
+```{r}
+TRANPER_box =nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = TRANPER, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Trans Fatty Acid % of Energy Intake")+ylab("Trans Fatty Acid %")+xlab("Sex")
+```
+
+## POLYPER
+
+
+```{r}
+POLYPER_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = POLYPER, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Polyunsaturated Fat % of Energy")+ylab("Polyunsaturated Fat %")+xlab("Sex")
+```
+
+
+## WATERG1
+
+
+
+
+```{r}
+WATERG1_box = nutr_ausold %>% ggplot()+ geom_boxplot(aes(x = SEX, y = WATERG1, fill = factor(HYPBC)), position = "dodge")+theme_bluewhite()+scale_fill_manual(name ="Hypertension", values = c("#FFFFF0", "#FFFF00"), labels =c("0"="No","1"="Yes"))+ggtitle("Water Consumption")+ylab("Water (g)")+xlab("Sex")
+```
+
+
+
+
+
+
+## plots
+
+
+```{r}
+#a =  ggarrange(ALCT_box+ggtitle("(A)"),RDMTGT1N_box+ggtitle("(B)"), nrow = 1)
+
+text = text_grob(expression(bold("Supplementary Figure 12. Boxplot of Health Survey Data - Red Meat, Alcohol, Fat\nThe boxplots compare nutrition consumption of sexes and people with/without hypertension from \nthe Australian Health Survey data. Overall, the boxplots' position, size and median \nvalue suggest that males consume more red meat, alcohol and fat. \nMoreover, males with hypertension have a higher consumption values.")), size = 9)
+sfigure12 =egg::ggarrange(plots= list(ALCT_box+ggtitle("(A)"),RDMTGT1N_box+ggtitle("(B)"), FATT_box+ggtitle("(C)")), ncol = 2, bottom = text,padding = unit(9, "line"))
+resave(sfigure12, file = "hoang_sfigure.Rdata")
+ggsave("images/sfigure12.png", plot = p)
+```
+
+
+
+```{r}
+a = grid.arrange(grobs =list(SATFATT_box+ggtitle("(A)"),CHOLT_box+ggtitle("(B)"),CAFFT_box+ggtitle("(C)"), SODIUMT_box+ggtitle("(D)")), nCol = 2)
+
+text = text_grob(expression(bold("Supplementary Figure 13. Boxplot of Health Survey Data- Saturated Fat, Cholesterol, Caffeine, Sodium\nThe boxplots compare nutrition consumption of sexes and people with/without hypertension from \nthe Australian Health Survey data. Overall, the boxplots' position, size and median \nvalue suggest that males consume more of the above mentioned nutrients. \nMoreover, males with hypertension have a higher consumption values.")), size =10)
+sfigure13 = ggarrange(plots = list(SATFATT_box+ggtitle("(A)"),CHOLT_box+ggtitle("(B)"),CAFFT_box+ggtitle("(C)"), SODIUMT_box+ggtitle("(D)")), bottom = text, padding = unit(9, "line"), nrow = 2)
+resave(sfigure13, file = "hoang_sfigure.Rdata")
+ggsave("images/sfigure13.png", plot = p)
+```
+
+
+
+```{r}
+text = text_grob(expression(bold("Supplementary Figure 22. Boxplot of Health Survey Data- Alcohol (%),\nFat (%), Trans Fatty Acid (mg), Polyunsaturated Fat (g)\nThe boxplots compare nutrition consumption of sexes and people with/without hypertension from \nthe Australian Health Survey data. Overall, the boxplots' position, size and median \nvalue suggest that males consume more or even of the above mentioned nutrients. \nMoreover, males with hypertension have a higher consumption values.")), size =10)
+sfigure22 = egg::ggarrange(plots =list(ALCPER_box+ggtitle("(A)"), FATPER_box+ggtitle("(D)"),TRANST_box+ggtitle("(C)"), PUFATT_box+ggtitle("(D)")), ncol = 2, bottom = text, padding = unit(11, "line"))
+resave(sfigure22, file = "hoang_sfigure.Rdata")
+ggsave("images/sfigure22.png", plot = p)
+```
+
+
+```{r}
+
+text = text_grob(expression(bold("Supplementary Figure 23. Boxplot of Health Survey Data - Water (g), Polyunsaturated Fat (%), \nTrans Fatty Acid (%), Saturated Fat (%)\nThe boxplots compare nutrition consumption of sexes and people with/without \nhypertension from the Australian Health Survey data. Overall, the boxplots' position, \nsize and median value suggest that males consume more or even of the above \nmentioned nutrients. Moreover, males with hypertension have a higher consumption values.")), size =9)
+
+sfigure23 = egg::ggarrange(plots =list(WATERG1_box+ggtitle("(A)"), POLYPER_box+ylab("Polyunsaturated\nFat (%)")+ggtitle("(B)"), TRANPER_box+ggtitle("(C)"), SATPER_box+ylab("Saturated\nFat (%)")+ggtitle("(D)")), ncol = 2, bottom = text, padding = unit(10,"line"))
+
+resave(sfigure23, file = "hoang_sfigure.Rdata")
+ggsave("images/sfigure23.png", plot = p)
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+a = table(nutr_ausold$SEX, nutr_ausold$HYPBC)
+chisq.test(a, correct = FALSE)
+```
+
+
+
+
+
+
+
+
+
+# Hyp female
+
+## FATT
+```{r}
+var  ="FATT"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Fat", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## RDMTTGT1N
+
+```{r}
+var  ="RDMTTG1N"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Red Meat", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+
+
+## ALCT
+
+```{r}
+var  ="ALCT"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Alcohol", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## SODIUMT
+
+```{r}
+nutr_aus_female = nutr_ausold[nutr_ausold$SEX == "Female",]
+```
+
+
+```{r}
+var = "SODIUMT"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Sodium", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+
+## CAFFT
+
+```{r}
+var = "CAFFT"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Caffeine", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+
+## CHOLT
+
+```{r}
+var = "CHOLT"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Cholesterol", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+## SATFATT
+
+```{r}
+var = "SATFATT"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Saturated Fat", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## PUFATT
+
+```{r}
+var = "PUFATT"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Polyunaturated Fat", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## TRANST
+
+
+```{r}
+var = "TRANST"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Trans Fatty Acid", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## FATPER
+
+
+```{r}
+var = "FATPER"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Fat %", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+
+## ALCPER
+
+```{r}
+var = "ALCPER"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Alcohol %", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## SATPER
+
+```{r}
+var  ="SATPER"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Saturated Fat %", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## TRANPER
+
+```{r}
+var  ="TRANPER"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Trans Fatty Acid %", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+## POLYPER
+
+
+```{r}
+var  ="POLYPER"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+p_table[nrow(p_table)+1,] = c("Polyunsaturated Fat %", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+
+## WATERG
+
+```{r}
+var  ="WATERG1"
+hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 1,]
+no_hyp_female = nutr_aus_female[nutr_aus_female$HYPBC == 0,]
+hyp_female = hyp_female[!(hyp_female[,var] %in% boxplot(hyp_female[,var], plot = F)),]
+no_hyp_female = no_hyp_female[!(no_hyp_female[,var] %in% boxplot(no_hyp_female[,var], plot = F)),]
+
+a = wilcox.test(hyp_female[,var],no_hyp_female[, var], alternative = "greater", correct = F)
+
+p_table[nrow(p_table)+1,] = c("Water", round(a$p.value, 4), a$p.value >= 0.05, "female")
+```
+
+
+
+```{r}
+colnames(p_table) = c("Variable", "P value", "Keep Null Hypothesis", "Sex")
+save(p_table, file = "table.RData")
+
+
+p_table %>% kbl(caption = text_grob("Demo"), booktabs = T) %>% kable_styling(full_width = F, latex_options = c("striped", "hold_position"))
+```
+
+
+

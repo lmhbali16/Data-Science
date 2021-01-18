@@ -1,0 +1,87 @@
+---
+title: "Hoang report"
+author: "Hoang"
+date: "10/31/2019"
+output: html_document
+---
+
+```{r}
+library(rmarkdown)
+draft("Report.Rmd", template="pdf", package="pinp", edit=FALSE)
+render("Report.rmd")
+```
+
+
+#4. Analysis
+
+
+## *4.1 Evaluation method*
+
+
+$$
+Y = \beta_0+\beta_1x_1+\beta_2x_2+...+\beta_ix_i+\epsilon, \quad
+i \in \mathbb{N}, i > 1
+$$
+
+
+We will adopt a multiple linear regression evaluation to predict the outcome variable where $Y=(Y_1,Y_2,Y_3...,Y_n)'$ is the response variable, $\beta =(\beta_0,\beta_1,...,\beta_n)'$ is the coefficient, $X =(x_1,x_2,...,x_n)'$ is the predictor variable and $\epsilon \sim N(0, \sigma^2)$ is our error term. The model must be able to predict the result of the dependent variable $Y$ based on $n$ number of independent predictors, $X$. In this project, we are trying to predict what the quality score of white wines,$Y$, based on physicochemical properties, $X$.
+
+To evaluate the performance of the regression model, error metrics as well as R-squared were calculated. For the errors, both Root Mean Square Error (RSME) and Mean Absolute Error (MAE) were calculated in order to avoid uncertainty in the result due to outliers within the dataset. We decided - to have an accurate measurement - to observe the out of sample performance not only 10-fold cross validation and holdout validation were used. Therefore, by separating the dataset into training and test sets in a 4:1 ratio, where the former dataset is used to fit the model and the latter is for compute the error of the model. The performance test on the model was conducted multiple times and with bootstrapping method, we resampled the dataset to have a better error measurement. In the end, the average RSME and MAE were used to judge performance.
+
+$$
+MAE= \frac{\sum_{i=1}^{m} |y- \hat{y_i}|}{m}, \quad RSME =\sqrt{\frac{\sum_{i=1}^{m} (y- \hat{y_i})^2}{m}}
+$$
+
+
+## *4.2 Assumptions for Regression Model*
+
+For our model to justify its validity, it is necessary to confirm it meets all the requirements of the every linear regression models. Hence, within the model, the all the predictors have to have a linear relationship with the outcome variable. We also have to be certain that all the errors are independent from each other, and that the errors have constant variance for all the datapoints. Finally, it is important that the errors follow a normal distribution.
+
+
+
+## *4.3 Model Selection*
+
+At first, the full model was chose with 11 chemical variables to predict the dependent variable. In order to find the final model, backward stepwise selection was required that deletes one inpute at a time until the most accurate model was found. For each  iteration, we compare the model with models from previous iterations as well as models suggested by the exhaustive searching method. In details, the following procedure was done in general:
+
+(1) we have our $M$ model with $i$ number of predictors.
+(2) Confirm every necessary assumption is met by the model.
+(3) Perform a performance test to measure the error.
+(4) Compare the results with models from previous iteration and model given by the exhaustive search.
+(5) Remove the least significant variable and repeat from (1-5).
+
+Note that if there were predictors dependent from each other, there was a performance test by swapping the two predictors in-and-out of the model. Overall, the procedure was repeated until the performance became worse than its previous iteration. 
+
+#5. Result
+
+
+All the work reported in this paper was conducted with **R** programming language that is an open source environment [] that is used in high-level data analysis and statistics. During the project, we used many different libraries, but probably the two of the most helpful packages were **MASS** and **caret** libraries that supported us with easy-to-use built-in functions to test model performance and to create plots.
+
+The aim of the project was to find the most accurate model that predicts white wine quality by the lowest RMSE and MAE. We started with 11 variables and an outcome variable (quality), and tested their significance of slope. The p-value suggested the $H_0$ for physicochemical variable chlorides, citric-acid and total sulfur-dioxide. That meant that there may be no linearity between the variables and the output. After the confirmation with plots, we removed them from the model.
+
+Before the backward stepwise selection was started, observations were needed to meet the necessary assumptions. Based on plotting and different trials, we decided to transform the variable alcohol, free sulfur-dioxide and volatile acidity to base 10 logarithm form. We also noticed that there were some predictors that were highly correlated to each other, so we observed the performance of models while swapping in-and-out these variables.
+
+After being certain that the model is valid, we started removing the predictors one-by-one based on their test statistics. Hence variable with the lowest test statistics was always removed. Then we compared our performance with previous iteration. Comparison was also done with models suggested by the exhaustive searching method as the method ranked the variables differently from the test statistics (e.g. variable density and pH had the same rank).
+
+To compare the different models, we used the _train()_ function provided by the **$R$** package and did a 10-fold cross validation. We also decided to do a holdout validation, and assigned 80% of the dataset into training and the other 20% into testing groups. For training dataset, we used it to fit the model, while the testing group was used for measuring the prediction errors of the model. This latter test was repeated 1000 times, and each time, we resampled the whole dataset, then assigning the data points into training and testing sets. With these test, the average RMSE and MAE were compared.
+
+In the end, 7 variables were kept (Table X) due to their highest performance in the model. The RMSE of the model was 0.74 while the MAE was 0.58. There was a suspicion about the R-squared value (0.30), but some other articles had similar results, so there was no more modification in the model. Although having less predictors does not lead to a much worse model, the main goal was to find the best model in terms of accuracy. If one would like to find a model that has high performance but few predictors, 4-5 variables are suggested.
+
+
+
+
+
+
+
+
+# Aaron Dataset
+
+The wine dataset was conducted by Paulo Cortez, Associate Professor in the University of Minho, Portugal. This dataset, which consists of 4898 samples with 12 variables, is done by the experiment which is used to predict qualities of every wine samples. Every wine sample was described with 12 physiochemical variables such as fixed acidity, violatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, and alcohol as well as quality rating. Each quality rating of the wine is based on the sensory test with the quality class from 0 which is very bad and 10 which is very excellent.
+
+
+
+
+
+
+
+
+

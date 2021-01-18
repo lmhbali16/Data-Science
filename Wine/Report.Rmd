@@ -1,0 +1,339 @@
+---
+title: Modelling Wine Quality with Multiple Linear Regression
+
+# Use letters for affiliations
+author:
+  - name: Hoang
+    affiliation: a
+  - name: 480380144
+    affiliation: a
+  - name: 480011455
+    affiliation: a
+  - name: Zain
+    affiliation:
+address:
+  - code: a
+    address: The University of Sydney, Camperdown NSW 2006
+  
+
+lead_author_surname: Hoang, Billy, Aaron, Zain
+
+# Place eg a DOI URL or CRAN Package URL here
+doi_footer: "DATA2902 Group T09-08 (PINP package)"
+
+# Abstract
+abstract: "This report is an attempt to predict wine quality based on its various physiochemical properties. To do this many linear regression models -- using physiochemical properties as predictors and the quality as the outcome -- were constructed and compared. Comparison involved analysing various metrics: of greatest interest were the root mean square error, the mean absolute error, and the R-squared statistic. Exhaustive search and backward stepwise selection methods were used. In the latter case, the most accurate model -- in other words, the one with the smallest calculated metrics -- was a regression model with seven predictor variables. These variables were the residual sugars, the density, the alcohol level, the amount of dissolved sulphates, the amount of dissolved sulphur dioxide, the wine's volatile acidity, and finally the pH. This model exhibited the best relative performance, however, in absolute terms, performance left much to be desired."
+
+# Optional: Acknowledgementsju
+acknowledgements: |
+
+# Optional: One or more keywords
+keywords:
+  - Regression
+  - Wine quality
+  - Model selection
+
+# Paper size for the document, values of letter and a4
+papersize: letter
+
+# Font size of the document, values of 9pt (default), 10pt, 11pt and 12pt
+fontsize: 9pt
+
+
+
+# Optional: Enable section numbering, default is unnumbered
+#numbersections: true
+numbersections: true
+
+# Optional: Specify the depth of section number, default is 5
+#secnumdepth: 5
+
+# Optional: Skip inserting final break between acknowledgements, default is false
+skip_final_break: true
+
+# Optional: Bibliography 
+bibliography: GroupReport.bib
+
+
+# Optional: Enable a 'Draft' watermark on the document
+#watermark: true
+
+# Customize footer, eg by referencing the vignette
+footer_contents: "Project Report"
+
+# Produce a pinp document
+output: pinp::pinp
+
+# Required: Vignette metadata for inclusion in a package.
+vignette: >
+  %\VignetteIndexEntry{YourPackage-vignetteentry}
+  %\VignetteKeywords{YourPackage, r, anotherkeyword}
+  %\VignettePackage{YourPackage}
+  %\VignetteEngine{knitr::rmarkdown}
+---
+nocite: '@*'
+---
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+library(pinp)
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(ggfortify)
+library(qtlcharts)
+library(mplot)
+library(MASS)
+library(Hmisc)
+library(broom)
+library(corrplot)
+library(caret)
+library(leaps)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(psych)
+library(ggthemes)
+
+
+wine = read.delim("winequality-white.csv", sep = ';')
+
+
+
+```
+
+```{r, message=FALSE, echo=FALSE, results="hide"}
+## Adding in the functions I needed to plot stuff.
+performance <- function(data,x){
+  wineTest = data
+  n = nrow(wine)
+  n_train = floor(0.8*n)
+  n_test = n-n_train
+  B = 1000
+  
+  mse_vector = vector(mode="numeric", length = B)
+  mae_vector = vector(mode="numeric", length = B)
+  
+  for(i in 1:B){
+    grp_labs = rep(c("Train", "Test"), times = c(n_train,n_test))
+    wineTest$grp = sample(grp_labs)
+    train_dat = wineTest %>% filter(grp == "Train")
+    lm_train = lm(quality ~ x, data = train_dat)
+    test_dat = wineTest %>% filter(grp == "Test")
+    pred = predict(lm_train, newdata = test_dat)
+    
+    mse = mean((test_dat$quality - pred)^2)
+    mse = sqrt(mse)
+    mse_vector[i] = mse
+    mae = mean(abs(test_dat$quality- pred))
+    mae_vector[i] = mae
+    
+    return(c(mean(mse_vector), mean(mae_vector)))
+  }
+}
+
+
+Fold10<- function(data,x){
+  fold_train = train(quality ~ x, data=data,method="lm",
+                     trControl = trainControl(method ="cv", number = 10, verboseIter =FALSE))
+}
+
+residualPredictor <- function(predictor, df, xlabel){
+  p <- df %>% ggplot(aes(x = predictor, y = .resid)) + geom_point() + geom_hline(yintercept=0, linetype="dashed", color = "red") + xlab(xlabel) + ylab("Residuals") + theme_clean()
+  p
+}
+  
+absResiduals <- function(predictor, df, xlabel, title){
+  df <- df %>% mutate(absResid = abs(.resid))
+  p <- df %>% ggplot(aes(x=predictor, y = absResid)) + geom_point() + xlab(xlabel) + ggtitle(title) + theme_clean()
+  p
+}    
+
+residFitted <- function(df){
+  df <- df %>% mutate(roundQual = round(.fitted, 0))
+  p <- df %>% ggplot(aes(x = roundQual, y = .resid)) + geom_point() + xlab("Rounded Fitted Values") + ylab("Residuals") + ggtitle("Residuals vs. Fitted Plot")
+  p
+}
+
+predictorOutcome <- function(df, predictor, xlabel){
+  p <- df %>% ggplot(aes(x=predictor, y = quality)) + geom_point() + xlab(xlabel) + ylab("Quality")
+  p
+}
+
+M0 = lm(quality ~ ., data= wine)
+dfM0 <- augment(M0)
+
+wine0 = wine %>% mutate(
+  resid = M0$residuals,
+  fitted = M0$fitted.values
+)
+M1 = update(M0, . ~ . -citric.acid)
+wine1 = wine %>% mutate(
+  resid = M1$residuals,
+  fitted = M1$fitted.values
+)
+
+M2 = update(M1, .~. - chlorides)
+wine2 = wine %>% mutate(
+  resid = M2$residuals,
+  fitted = M2$fitted.values
+)
+M3 = update(M2, .~. -total.sulfur.dioxide)
+dfM3 <- augment(M3)
+
+``` 
+
+# Introduction 
+
+Wine quality is a phrase that encompasses a range of sensory features – mouthfeel, taste, aroma, aging potential, visual appeal, and more. The complexity of wine as an alcoholic beverage has brought forth a new paradigm, and this can be summarised with the following question: to what extent can one understand wine quality through its physicochemical components? Literature on this subject is diverse, ranging from studies on phenolic compounds and polysaccharides, to the effects of proteins and ethanol. Each characteristic, it is argued, contributes to wine quality in different ways and with differing intensities. For example, volatile compounds in wine, present at extremely low concentrations, interact in complicated ways to produce certain aromas; fruity smells are a result of acetate esters and ethyl esters, animalic and otherwise unpleasant smells are attributed to the presence of phenols above their threshold level, etc.  
+In short, the subject is complicated. We contribute to this discussion, however tentatively, by training a regression model to predict wine quality based on certain physiochemical parameters. 
+
+# Data Set
+
+The wine dataset is the making of Paulo Cortez, Associate Professor at the University of Minho, Portugal. It consists of 4898 samples with 12 variables [see figure 1], 11 of which are physiochemical measurements -- examples include *fixed acidity*, *citric acid*, and  *residual sugar*. We could not find explicit documentation on the units for these measurements. The other variable, *quality*,  is a subjective rating based on a sensory test conducted by experts; it is measured on a 0-10 scale, 0 the worst, 10 the best.
+
+```{r,message=FALSE, warning=FALSE, echo=FALSE}
+
+
+summary_table = psych::describe(wine)
+
+summary_table <- as.data.frame(summary_table)
+
+sum = summary_table %>% dplyr::select(.,"min","max", "mean")
+
+rownames(sum) <- c("fixed acidity", "volatile acidity", "citric-acid","residual sugar","chlorides", "free sulfur-dioxide", "total sulfur-dioxide", "density", "pH","sulphates","alcohol","quality")
+
+sum$min <- round(sum$min,2)
+sum$max = round(sum$max, 2)
+sum$mean = round(sum$mean, 2)
+colnames(sum) <- c("Min", "Max", "Mean")
+kableExtra::kable(sum, caption = "Fig. 1. Statistics of Variables", format = "latex")
+```
+
+# Analysis
+
+## *The Model*
+
+The linear regression model can be succinctly summarised in vector notation as:
+$$
+\boldsymbol{Y} =  \boldsymbol{X}\boldsymbol{\beta}+\boldsymbol{\epsilon}
+$$
+Where $\boldsymbol{Y}$ and $\boldsymbol{\epsilon}$ are ($n$ x $1$), $\boldsymbol{X}$ is ($n$ x $p$) and $\boldsymbol{\beta}$ is ($p$ x $1$) ($n$ being the number of observations and $p$ being the number of predictors).
+
+We will adopt a multiple linear regression evaluation to predict the outcome variable where $\boldsymbol{Y}=(Y_1,Y_2,Y_3...,Y_n)'$ is the response variable *quality*, $\boldsymbol{\hat{\beta}} =(\beta_0,\beta_1,...,\beta_p)'$ is the vector of least squares of regression coefficients, $\boldsymbol{X} =(\boldsymbol{x_1},\boldsymbol{x_2},...,\boldsymbol{x_n})'$ is the matrix of predictor variable vectors where $\boldsymbol{x}_i=(1,x_1,x_2,...,x_p)$ and $\boldsymbol{\epsilon} \sim N(0, \sigma^2)$ is the vector of error terms (residuals), $\boldsymbol{\epsilon}=(\epsilon_1,\epsilon_2,...,\epsilon_n)$. 
+
+The model must be able to predict the result of the dependent variable $\boldsymbol{Y}$ based on $p$ independent predictors, $\boldsymbol{X}$. In this project, we are trying to predict what the quality score of white wines, $\boldsymbol{Y}$, based on physicochemical properties, $\boldsymbol{X}$.
+
+## *Assumptions for Regression Model*
+
+A few assumptions require careful consideration. These are:
+
+(1) Linearity: our model must be linear, or approximately so, in all the predictor variables.
+(2) No Multicolinearity: no two predictor variables are to be highly correlated.
+(3) Independence of the residual terms.
+(4) Homoscedacisity: the residuals must have constant variance.
+(5) Normality: the residuals must be normally distributed.
+
+### *Linearity*
+<!-- package:ggplot -->
+To check this we plot each predictor variable against the outcome variable and fit a linear regression line. If the variable appears non-linear, certain transformations (e.g. $log(x)$) may be implemented to enforce linearity. Alternatively, we plot the residuals against each predictor, checking whether they are symmetrically distributed about $y = 0$. If the variable shows little sign of linearity, we delete it.
+ 
+Figure 2 represents one example of a residual-predictor plot, here done for the alcohol variable. Here the residuals are more or less scattered evenly above and below the line $y = 0$. All predictor variables exhibited this characteristic -- for brevity, we omit them. \newline
+
+Figure 3 represents the outcome variable, quality, against the sulphates predictor. At first glance this plot appears strange: no real linear relationship is apparent.
+```{r,message=FALSE, warning=FALSE,echo=FALSE}
+residualPredictor(dfM3$alcohol, dfM3, "Alcohol") + ggtitle("Residual vs. Alcohol", subtitle = "Figure 2")
+predictorOutcome(dfM3, dfM3$sulphates, "Sulphates") + ggtitle("Quality vs. Sulphates", subtitle = "Figure 3")
+```
+
+### *No Multicolinearity*
+<!-- package:corrplot -->
+Based on the correlation plot [Fig 4.], there are some chemical variables that are dependent on each other indicated by high correlation coefficients, namely *density* and *residual sugar*. Even though these two variables are colinear, our aim is to find the model that has the best predictive ability. The "no multicolinearity" assumption is not important regarding the aim of our model.
+```{r,message=FALSE, warning=FALSE, echo=FALSE}
+cor = round(cor(wine),2)
+
+colnames(cor) <- c("fixed acidity", "volatile acidity", "citric-acid","residual sugar","chlorides", "free sulfur-dioxide", "total sulfur-dioxide", "density", "pH","sulphates","alcohol","quality")
+
+
+a = corrplot(cor, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45, title = "Figure 4. Correlation Plot",mar=c(0,0,1,0))
+```
+
+### *Independence*
+
+This assumption is mostly a matter of trust. We assume careful data-collection methods were used -- if this is true, the residuals must be independent. 
+
+### *Homoskedasticity and Normality*
+<!-- package:ggfortify -->
+To check for homoscedacisity, we analyse the residual plots for each predictor in a similar way to the linearity assumption check. We were interested if the values form a horizontal band that suggest equal variance and thus homoscedacisity. Again, figure 2 is a paradigmatic example of such a plot.
+
+For normality, Q-Q plots were created. Figure 5, below, indicates that the residuals are approximately linear with respect to the normal quantiles.
+```{r,message=FALSE, warning=FALSE,echo=FALSE}
+qqnorm(dfM3$.resid, ylab="Residuals", main="Figure 5: Normal Q-Q Plot")
+
+```
+
+
+## *Model Selection*
+
+Our aim was to find the most accurate multilinear regression model that predicts white wine *quality* with the best in-sample and out-of-sample predictive performance. To do this, we conducted a backward stepwise selection: starting with all eleven physiochemical predictor variables, we trimmed it down to the most essential. For each  iteration, we compare the model with models from previous iterations as well as models suggested by the exhaustive searching method. In detail, our procedure inovlved the following steps:
+
+(1) we have our model $M$ with $p$ number of predictors.
+(2) Confirm every necessary assumption is met by the model using assumption checks outlined previously.
+(3) Perform a 5-fold cross-validation test to quantify the performance
+(4) Compare the results with models from previous iterations and, if it is currently the best model, adopt it as our current best model $\hat{M}$. 
+(5) Remove the least significant variable and repeat from (1-5).
+
+ Overall, the procedure was repeated until the performance became worse than its previous iteration and the final $\hat{M}_7$ became our model. 
+ 
+ The model selection process outlined above and found that the p-values of the physiochemical variables *chlorides*, *citric-acid*, *total sulfur-dioxide* and *fixed acidity* were all large, indicating their slopes were not significantly different to the null hypothesis of $0$. Thus, the iterative backward selection process omitted these variables. They offered no linear predictive ability in our model. To confirm this, we looked at the plots for each variable and saw that there was no linearity between these variables and *quality*, further validating our omission. Any further omissions were found to make performance worse. This brought our model, $\hat{M}$, down to the most optimal 7 variables. Call this model $\hat{M}_7$.
+ 
+```{r,message=FALSE, warning=FALSE,echo=FALSE}
+load("lm_w_and_vis_w")
+plot(vis.w, which = "vip", tag = "chart") + labs(title = "Variable Inclusion Plot (Figure 6)") + theme(plot.title = element_text(size = 11))
+```
+
+From the variable inclusion plot (figure 6) we can clearly see our findings from backwards selection visualised. *Chlorides*, *citric acid*,  *total sulfur dioxide* and *fixed acidity* all drop off similarly to the random variable *RV*, further validating their omission from the model.
+
+To ensure there are no models with a lesser number of predictor variables that offer better performance better than $\hat{M}_7$, we used exhaustive searching to test all predictor combinations that totalled to less than 7. No model was found to be better than $\hat{M}_7$.
+
+# Result
+
+```{r,message=FALSE, warning=FALSE,echo=FALSE}
+model = lm(quality ~ log10(volatile.acidity)+residual.sugar+log10(free.sulfur.dioxide)+density+pH+sulphates+log10(alcohol),data =wine)
+
+
+
+mod = data.frame(drop1(model,test = "F"))
+mod = mod[2:8,]
+mod = round(mod[,1:5],2)
+
+
+rownames(mod) <- c("log(volatile acidity)", "residual sugar","log(free sulfur-dioxide)","density","pH","sulphates","log(alcohol)")
+
+# kableExtra::kable(mod) ##################
+kableExtra::kable(mod, format = "latex", caption ="Fig.7. Regression Summary Table")
+```
+
+To evaluate the performance of our most optimal model, we used both 10-fold cross validation and a holdout validation. The 10-fold cross validation was conducted in the same way as in the model selection process. The holdout validation involved assigning 80% of the dataset to training and 20% to testing. For training dataset, we used it to fit the model, while the testing group was used for measuring the prediction errors of the model. This latter test was repeated 1000 times, and each time, we resampled the whole dataset, then assigning the data points into training and testing sets. The average RMSE and MAE across these tests were then calculated.
+
+
+In the end, 7 variables were kept -- this represents an optimal balance between simplicity and prediction. The RMSE for this model was 0.74 and the MAE was 0.58. The R-squared value (0.30) is not exactly ideal, but we suspect this is due to the nature of the data: the chemistry of wine is far more complicated, far more nuanced, than anything captured by a regression model. 
+$$
+Y_{quality} = 0.54*\textit{sulphates}+0.54*{\log{(\textit{free sulfur-dioxide})}}+0.39*{
+\textit{pH}}\\+0.06*{\textit{residual sugar}}-1.29*{\log{(\textit{volatile acidity})}}+5.88*{\log{(\textit{alcohol)}}}\\-118.09*{\textit{density}}+113.75
+$$
+
+# Discussion
+
+Overall, our results show that we were able to achieve the aim of finding the multilinear regression model that predicts white wine *quality* with the best in-sample and out-of-sample predictive performance. We found that *volatile acidity* was the best predictor of *quality* (highest F value in figure 7), followed by the remaining six variables in our model. Our final model, $\hat{M}_7$, was arrived at through backward selection from the full model and was shown to be the best performing model by comparison to models found through exhaustive searching.
+
+Despite showing that $\hat{M}_7$ was the best performing linear regression model, it yielded an incredibly low R-squared value of only 0.30. This is similar to the findings of other papers. This is probably due to the incredibly complicated and nuanced nature of the dataset. There are just so many variables become responsible for wine quality and not nearly enough of them were quantified in our report. 
+
+Another reason for the poor performance of our model could be due to the subjective nature of the dependent variable. This nature probably resulted in a vastly exaggerated variance that made linear regression very inaccurate.
+
+Ultimately, while we were able to achieve our aim of finding the best linear regression model, it is likely that the nature of the dataset implies that a linear regression model may not be appropriate. Perhaps another model may have performed better and this should be an area for further research.
+
+# References 
+
+
+
