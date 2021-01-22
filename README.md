@@ -1,6 +1,6 @@
 # Data Science Projects
 
-There are 3 major projects in thsi folder I completed during my Data Science course
+There are 3 major projects in this folder I completed during my Data Science course
 
 ## Wine quality prediction
 
